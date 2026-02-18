@@ -5,12 +5,9 @@ using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Forms;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using Microsoft.Win32;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace YoutubeDownloader;
 
@@ -18,15 +15,18 @@ public partial class MainWindow : Window
 {
     private List<VideoFormat> _formatsList = new();
 
-    // HttpClient واحد مشترك — أفضل ممارسة في .NET
+    // true  → الرابط playlist
+    // false → فيديو عادي
+    private bool _isPlaylist = false;
+
+    // مجلد الحفظ للـ playlist
+    private string _playlistFolder = "";
+
     private static readonly HttpClient _http = new()
     {
         Timeout = TimeSpan.FromSeconds(15)
     };
 
-    // ── تعديل وحيد لتسريع التحميل ──────────────────────────────────────────
-    // concurrent-fragments 8  →  يقسّم الملف لـ 8 أجزاء متوازية (fragments)
-    // N2 = عدد الأجزاء، يمكن رفعه لـ 16 على إنترنت سريع
     private const int DownloadFragments = 8;
 
     public MainWindow()
@@ -43,12 +43,25 @@ public partial class MainWindow : Window
         public long   Filesize { get; set; }
     }
 
-    // ─── Placeholder visibility ──────────────────────────────────────────────
+    // ─── Placeholder ─────────────────────────────────────────────────────────
     private void TxtUrl_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
         TxtPlaceholder.Visibility = string.IsNullOrEmpty(TxtUrl.Text)
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    // ─── Helper: is this URL a playlist? ────────────────────────────────────
+    private static bool DetectPlaylist(string url)
+    {
+        // يعتبر playlist لو في "list=" في الرابط بدون "v=" مفرد
+        // أو "playlist?" أو "/playlist"
+        bool hasList  = url.Contains("list=", StringComparison.OrdinalIgnoreCase);
+        bool hasVideo = Regex.IsMatch(url, @"[?&]v=[\w-]+", RegexOptions.IgnoreCase);
+
+        // لو list موجود وlا فيديو واحد محدد → playlist
+        // لو list موجود مع فيديو → فيديو مفرد (جزء من playlist)
+        return hasList && !hasVideo;
     }
 
     // ─── Analyze ─────────────────────────────────────────────────────────────
@@ -59,9 +72,23 @@ public partial class MainWindow : Window
 
         BtnAnalyze.IsEnabled  = false;
         BtnDownload.IsEnabled = false;
-        VideoCard.Visibility  = Visibility.Collapsed;
-        SetStatus("Analyzing video…", "#FF9900");
+        VideoCard.Visibility    = Visibility.Collapsed;
+        PlaylistCard.Visibility = Visibility.Collapsed;
+        SetStatus("Analyzing…", "#FF9900");
 
+        _isPlaylist = DetectPlaylist(url);
+
+        if (_isPlaylist)
+            await AnalyzePlaylist(url);
+        else
+            await AnalyzeVideo(url);
+
+        BtnAnalyze.IsEnabled = true;
+    }
+
+    // ─── Analyze — single video ──────────────────────────────────────────────
+    private async Task AnalyzeVideo(string url)
+    {
         try
         {
             var startInfo = new ProcessStartInfo
@@ -88,18 +115,12 @@ public partial class MainWindow : Window
 
             var node    = JsonNode.Parse(json);
             var formats = node?["formats"]?.AsArray();
-            if (formats == null)
-            {
-                SetStatus("Could not parse video formats.", "#FF4444");
-                return;
-            }
+            if (formats == null) { SetStatus("Could not parse video formats.", "#FF4444"); return; }
 
-            // ── Metadata ─────────────────────────────────────────────────────
             string title    = node?["title"]?.ToString()    ?? "Unknown Title";
             string channel  = node?["uploader"]?.ToString() ?? "Unknown Channel";
             string thumbUrl = node?["thumbnail"]?.ToString() ?? "";
 
-            // ── Build formats (video streams only) ────────────────────────────
             _formatsList = formats
                 .Where(f => f?["vcodec"]?.ToString() is string vc && vc != "none")
                 .Select(f =>
@@ -112,36 +133,24 @@ public partial class MainWindow : Window
                     string note = f["format_note"]?.ToString()
                                ?? f["resolution"]?.ToString()
                                ?? f["format_id"]!.ToString();
-
-                    string sizeLabel = size > 0
-                        ? $"{size / 1024.0 / 1024.0:F1} MB"
-                        : "size N/A";
+                    string sizeLabel = size > 0 ? $"{size / 1024.0 / 1024.0:F1} MB" : "size N/A";
 
                     return new VideoFormat
                     {
-                        Id       = f["format_id"]!.ToString(),
-                        Ext      = ext,
+                        Id      = f["format_id"]!.ToString(),
+                        Ext     = ext,
                         Filesize = size,
-                        Display  = $"{note} ({ext}) — {sizeLabel}"
+                        Display = $"{note} ({ext}) — {sizeLabel}"
                     };
                 })
                 .OrderByDescending(x => x.Filesize)
                 .ToList();
 
-            if (_formatsList.Count == 0)
-            {
-                SetStatus("No downloadable video formats found.", "#FF4444");
-                return;
-            }
+            if (_formatsList.Count == 0) { SetStatus("No downloadable video formats found.", "#FF4444"); return; }
 
-            // ── Update UI ─────────────────────────────────────────────────────
             TxtTitle.Text   = title;
             TxtChannel.Text = channel;
 
-            // ── تحميل الصورة المصغّرة بشكل صحيح عبر HttpClient + MemoryStream
-            // السبب: BitmapImage من URI خارجي لا يمكن Freeze() لأنه async بطبيعته
-            // الحل: نحمّل البايتات أولاً في background thread، ثم نبني BitmapImage
-            //        من MemoryStream على الـ UI thread — هذا يسمح بـ Freeze() آمن
             if (!string.IsNullOrEmpty(thumbUrl))
             {
                 try
@@ -151,16 +160,12 @@ public partial class MainWindow : Window
                     var bmp = new BitmapImage();
                     bmp.BeginInit();
                     bmp.CacheOption  = BitmapCacheOption.OnLoad;
-                    bmp.StreamSource = ms;          // من stream وليس URI → يسمح بـ Freeze
+                    bmp.StreamSource = ms;
                     bmp.EndInit();
-                    bmp.Freeze();                   // آمن الآن ← يحسّن الأداء ويمنع memory leaks
+                    bmp.Freeze();
                     ImgThumbnail.Source = bmp;
                 }
-                catch
-                {
-                    // لو فشل تحميل الصورة، نتجاهل بصمت — لا نوقف العملية كلها
-                    ImgThumbnail.Source = null;
-                }
+                catch { ImgThumbnail.Source = null; }
             }
 
             ComboFormats.ItemsSource   = _formatsList;
@@ -172,13 +177,94 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Analysis Error:\n{ex.Message}", "Error",
+            System.Windows.MessageBox.Show($"Analysis Error:\n{ex.Message}", "Error",
                             MessageBoxButton.OK, MessageBoxImage.Error);
             SetStatus("Analysis failed.", "#FF4444");
         }
-        finally
+    }
+
+    // ─── Analyze — playlist ──────────────────────────────────────────────────
+    private async Task AnalyzePlaylist(string url)
+    {
+        try
         {
-            BtnAnalyze.IsEnabled = true;
+            // --flat-playlist → سريع جداً (لا يحمّل كل فيديو، فقط البيانات الأساسية)
+            var startInfo = new ProcessStartInfo
+            {
+                FileName               = "yt-dlp.exe",
+                Arguments              = $"--flat-playlist --dump-json \"{url}\"",
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8
+            };
+
+            // كل سطر = JSON فيديو واحد
+            var lines = new List<string>();
+            await Task.Run(() =>
+            {
+                using var proc = Process.Start(startInfo)!;
+                string? line;
+                while ((line = proc.StandardOutput.ReadLine()) != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                        lines.Add(line);
+                }
+                proc.WaitForExit();
+            });
+
+            if (lines.Count == 0)
+            {
+                SetStatus("No videos found in playlist. Check the URL.", "#FF4444");
+                return;
+            }
+
+            // نجيب بيانات أول فيديو عشان نعرف اسم الـ playlist والقناة
+            string playlistTitle   = "Unknown Playlist";
+            string playlistChannel = "Unknown Channel";
+            try
+            {
+                var first = JsonNode.Parse(lines[0]);
+                playlistTitle   = first?["playlist_title"]?.ToString()
+                               ?? first?["playlist"]?.ToString()
+                               ?? "YouTube Playlist";
+                playlistChannel = first?["uploader"]?.ToString()
+                               ?? first?["channel"]?.ToString()
+                               ?? "Unknown Channel";
+            }
+            catch { /* ignore */ }
+
+            TxtPlaylistTitle.Text   = playlistTitle;
+            TxtPlaylistChannel.Text = playlistChannel;
+            TxtVideoCount.Text      = lines.Count.ToString();
+
+            PlaylistCard.Visibility       = Visibility.Visible;
+            PlaylistProgressPanel.Visibility = Visibility.Collapsed;
+            BtnDownload.IsEnabled         = true;
+            SetStatus($"Playlist ready — {lines.Count} videos found", "#00D26A");
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Playlist Analysis Error:\n{ex.Message}", "Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+            SetStatus("Playlist analysis failed.", "#FF4444");
+        }
+    }
+
+    // ─── Choose folder ───────────────────────────────────────────────────────
+    private void BtnChooseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        using var dlg = new FolderBrowserDialog
+        {
+            Description         = "Choose download folder for playlist",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true
+        };
+        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            _playlistFolder           = dlg.SelectedPath;
+            TxtPlaylistFolder.Text    = _playlistFolder;
+            TxtPlaylistFolder.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF0, 0xF0, 0xF0));
         }
     }
 
@@ -192,22 +278,30 @@ public partial class MainWindow : Window
             TxtFormatInfo.Text = "Select your preferred resolution above";
     }
 
-    // ─── Download ────────────────────────────────────────────────────────────
+    // ─── Download dispatcher ─────────────────────────────────────────────────
     private async void BtnDownload_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isPlaylist)
+            await DownloadPlaylist();
+        else
+            await DownloadSingleVideo();
+    }
+
+    // ─── Download — single video ─────────────────────────────────────────────
+    private async Task DownloadSingleVideo()
     {
         if (ComboFormats.SelectedItem is not VideoFormat selected)
         {
-            MessageBox.Show("Please select a quality first.", "No Format Selected",
+            System.Windows.MessageBox.Show("Please select a quality first.", "No Format Selected",
                             MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        // Sanitize filename
         string cleanTitle = TxtTitle.Text;
-        foreach (char c in System.IO.Path.GetInvalidFileNameChars())
+        foreach (char c in Path.GetInvalidFileNameChars())
             cleanTitle = cleanTitle.Replace(c, '_');
 
-        var sfd = new SaveFileDialog
+        var sfd = new Microsoft.Win32.SaveFileDialog
         {
             Filter   = "MP4 Video|*.mp4",
             FileName = $"{cleanTitle}.mp4"
@@ -219,10 +313,8 @@ public partial class MainWindow : Window
         ProgBar.Value         = 0;
         TxtPercent.Text       = "";
 
-        // RadioAudioHigh / RadioAudioLow ← يطابقان XAML بالضبط
         string audioMode = RadioAudioHigh.IsChecked == true ? "bestaudio" : "worstaudio";
 
-        // ── --concurrent-fragments N  →  core of the speed improvement ────────
         var startInfo = new ProcessStartInfo
         {
             FileName               = "yt-dlp.exe",
@@ -244,11 +336,11 @@ public partial class MainWindow : Window
                 using var process = new Process { StartInfo = startInfo };
                 process.OutputDataReceived += (s, ev) =>
                 {
-                    if (!string.IsNullOrEmpty(ev.Data)) ParseProgressLine(ev.Data);
+                    if (!string.IsNullOrEmpty(ev.Data)) ParseProgressLine(ev.Data, isPlaylist: false);
                 };
                 process.ErrorDataReceived += (s, ev) =>
                 {
-                    if (!string.IsNullOrEmpty(ev.Data)) ParseProgressLine(ev.Data);
+                    if (!string.IsNullOrEmpty(ev.Data)) ParseProgressLine(ev.Data, isPlaylist: false);
                 };
                 process.Start();
                 process.BeginOutputReadLine();
@@ -256,12 +348,11 @@ public partial class MainWindow : Window
                 process.WaitForExit();
             });
 
-            SuccessOverlay.Visibility = Visibility.Visible;
-            SetStatus("Ready", "#2e2e2e");
+            ShowSuccess("Download Complete!", "File saved successfully.");
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Download Error:\n{ex.Message}", "Error",
+            System.Windows.MessageBox.Show($"Download Error:\n{ex.Message}", "Error",
                             MessageBoxButton.OK, MessageBoxImage.Error);
             SetStatus("Download failed.", "#FF4444");
         }
@@ -277,26 +368,193 @@ public partial class MainWindow : Window
         }
     }
 
+    // ─── Download — playlist ─────────────────────────────────────────────────
+    private async Task DownloadPlaylist()
+    {
+        // التحقق من المجلد
+        if (string.IsNullOrEmpty(_playlistFolder) || !Directory.Exists(_playlistFolder))
+        {
+            System.Windows.MessageBox.Show("Please choose a valid save folder first.",
+                            "No Folder Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // جودة الفيديو
+        string qualityFilter = BuildPlaylistQualityFilter();
+        string audioMode     = RadioAudioHigh.IsChecked == true ? "bestaudio" : "worstaudio";
+
+        // نطاق الفيديوهات
+        string playlistItems = "";
+        string from = TxtPlaylistFrom.Text.Trim();
+        string to   = TxtPlaylistTo.Text.Trim();
+        if (!string.IsNullOrEmpty(from) || !string.IsNullOrEmpty(to))
+        {
+            string start = string.IsNullOrEmpty(from) ? "1"   : from;
+            string end   = string.IsNullOrEmpty(to)   ? "999" : to;
+            playlistItems = $"--playlist-items {start}:{end} ";
+        }
+
+        // Template اسم الملف: رقم_عنوان.mp4
+        string outputTemplate = Path.Combine(_playlistFolder, "%(playlist_index)s - %(title)s.%(ext)s");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName               = "yt-dlp.exe",
+            Arguments              = $"-f \"{qualityFilter}+{audioMode}\" "
+                                   + $"--concurrent-fragments {DownloadFragments} "
+                                   + $"--newline --merge-output-format mp4 "
+                                   + $"--ffmpeg-location . "
+                                   + playlistItems
+                                   + $"-o \"{outputTemplate}\" \"{TxtUrl.Text}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+            CreateNoWindow         = true
+        };
+
+        BtnDownload.IsEnabled            = false;
+        BtnAnalyze.IsEnabled             = false;
+        PlaylistProgressPanel.Visibility = Visibility.Visible;
+        ProgBarPlaylist.Value            = 0;
+        ProgBarVideo.Value               = 0;
+
+        int totalVideos   = int.Parse(TxtVideoCount.Text);
+        int currentIndex  = 0;
+
+        SetStatus("Starting playlist download…", "#FF9900");
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var process = new Process { StartInfo = startInfo };
+
+                process.OutputDataReceived += (s, ev) =>
+                {
+                    if (string.IsNullOrEmpty(ev.Data)) return;
+                    // كشف بداية فيديو جديد
+                    var newVideoMatch = Regex.Match(ev.Data,
+                        @"\[download\] Downloading item (\d+) of (\d+)");
+                    if (newVideoMatch.Success)
+                    {
+                        int idx   = int.Parse(newVideoMatch.Groups[1].Value);
+                        int total = int.Parse(newVideoMatch.Groups[2].Value);
+                        currentIndex = idx;
+                        Dispatcher.Invoke(() =>
+                        {
+                            TxtCurrentVideoLabel.Text = $"Downloading video {idx} of {total}…";
+                            TxtPlaylistOverall.Text   = $"{idx - 1}/{total} done";
+                            ProgBarPlaylist.Value     = (idx - 1) * 100.0 / total;
+                            ProgBarVideo.Value        = 0;
+                            TxtVideoCount.Text        = total.ToString();
+                        });
+                    }
+
+                    // اسم الفيديو الحالي
+                    var titleMatch = Regex.Match(ev.Data,
+                        @"\[download\] Destination: .+[\\/](?:\d+ - )?(.+?)\.(mp4|webm|mkv)");
+                    if (titleMatch.Success)
+                    {
+                        string vTitle = titleMatch.Groups[1].Value;
+                        Dispatcher.Invoke(() => TxtCurrentVideoTitle.Text = vTitle);
+                    }
+
+                    ParseProgressLine(ev.Data, isPlaylist: true,
+                        currentIdx: currentIndex, total: totalVideos);
+                };
+
+                process.ErrorDataReceived += (s, ev) =>
+                {
+                    if (!string.IsNullOrEmpty(ev.Data))
+                        ParseProgressLine(ev.Data, isPlaylist: true,
+                            currentIdx: currentIndex, total: totalVideos);
+                };
+
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                process.WaitForExit();
+            });
+
+            Dispatcher.Invoke(() =>
+            {
+                ProgBarPlaylist.Value = 100;
+                ProgBarVideo.Value   = 100;
+            });
+
+            ShowSuccess("Playlist Downloaded!", $"All videos saved to:\n{_playlistFolder}");
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Playlist Download Error:\n{ex.Message}", "Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+            SetStatus("Playlist download failed.", "#FF4444");
+        }
+        finally
+        {
+            BtnDownload.IsEnabled   = true;
+            BtnAnalyze.IsEnabled    = true;
+            ProgBar.IsIndeterminate = false;
+            ProgBar.Value           = 0;
+            TxtPercent.Text         = "";
+            TxtSpeed.Text           = "";
+            TxtEta.Text             = "";
+        }
+    }
+
+    // ─── Quality filter builder ──────────────────────────────────────────────
+    private string BuildPlaylistQualityFilter()
+    {
+        if (ComboPlaylistQuality.SelectedItem is not System.Windows.Controls.ComboBoxItem item)
+            return "bestvideo";
+
+        return item.Content?.ToString() switch
+        {
+            "1080p"                        => "bestvideo[height<=1080]",
+            "720p"                         => "bestvideo[height<=720]",
+            "480p"                         => "bestvideo[height<=480]",
+            "360p"                         => "bestvideo[height<=360]",
+            "Worst Quality (smallest)"     => "worstvideo",
+            _                              => "bestvideo"   // Best Quality
+        };
+    }
+
     // ─── Progress Parser ─────────────────────────────────────────────────────
     private static readonly Regex _progressRegex = new(
         @"\[download\]\s+(?<pct>[\d.]+)%\s+of\s+.*?\s+at\s+(?<spd>\S+)\s+ETA\s+(?<eta>\S+)",
         RegexOptions.Compiled);
 
-    private void ParseProgressLine(string line)
+    private void ParseProgressLine(string line, bool isPlaylist,
+        int currentIdx = 0, int total = 1)
     {
         var match = _progressRegex.Match(line);
         Dispatcher.Invoke(() =>
         {
             if (match.Success)
             {
-                ProgBar.IsIndeterminate = false;
                 if (double.TryParse(match.Groups["pct"].Value,
                     System.Globalization.NumberStyles.Any,
                     System.Globalization.CultureInfo.InvariantCulture,
                     out double pct))
                 {
-                    ProgBar.Value   = pct;
-                    TxtPercent.Text = $"{pct:F1}%";
+                    if (isPlaylist)
+                    {
+                        ProgBarVideo.IsIndeterminate = false;
+                        ProgBarVideo.Value = pct;
+
+                        // Overall: (completed + fraction of current)
+                        double overallPct = total > 0
+                            ? ((currentIdx - 1) + pct / 100.0) / total * 100.0
+                            : 0;
+                        ProgBarPlaylist.Value       = overallPct;
+                        TxtPlaylistOverall.Text     = $"{currentIdx - 1}/{total} done";
+                    }
+                    else
+                    {
+                        ProgBar.IsIndeterminate = false;
+                        ProgBar.Value   = pct;
+                        TxtPercent.Text = $"{pct:F1}%";
+                    }
                 }
                 TxtSpeed.Text = match.Groups["spd"].Value;
                 TxtEta.Text   = $"ETA {match.Groups["eta"].Value}";
@@ -305,24 +563,46 @@ public partial class MainWindow : Window
             else if (line.Contains("[Merger]"))
             {
                 SetStatus("Merging Video & Audio…", "#4488FF");
-                ProgBar.IsIndeterminate = true;
+                if (isPlaylist)
+                    ProgBarVideo.IsIndeterminate = true;
+                else
+                    ProgBar.IsIndeterminate = true;
+            }
+            else if (line.Contains("[download] 100%"))
+            {
+                if (isPlaylist)
+                {
+                    ProgBarVideo.IsIndeterminate = false;
+                    ProgBarVideo.Value = 100;
+                }
             }
         });
     }
 
-    // ─── Status helper (text + dot colour) ───────────────────────────────────
+    // ─── Status helper ────────────────────────────────────────────────────────
     private void SetStatus(string text, string hexColor)
     {
         TxtStatus.Text = text;
         try
         {
-            var color = (Color)ColorConverter.ConvertFromString(hexColor);
+            var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hexColor);
             StatusDot.Fill = new SolidColorBrush(color);
         }
-        catch { /* ignore bad hex */ }
+        catch { }
     }
 
     // ─── Success overlay ─────────────────────────────────────────────────────
+    private void ShowSuccess(string title, string subtitle)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            TxtSuccessTitle.Text    = title;
+            TxtSuccessSubtitle.Text = subtitle;
+            SuccessOverlay.Visibility = Visibility.Visible;
+            SetStatus("Ready", "#2e2e2e");
+        });
+    }
+
     private void CloseSuccess_Click(object sender, RoutedEventArgs e)
         => SuccessOverlay.Visibility = Visibility.Collapsed;
 }
