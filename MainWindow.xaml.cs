@@ -6,6 +6,9 @@ namespace YoutubeDownloader;
 
 public partial class MainWindow : Window
 {
+    private DownloaderPage _downloaderPage;
+    private AppInfoPage _appInfoPage;
+    
     private static readonly Color _activeRed    = Color.FromRgb(0xFF, 0x20, 0x20);
     private static readonly Color _iconActive   = Color.FromRgb(0x1A, 0x05, 0x05);
     private static readonly Color _iconInactive = Colors.Transparent;
@@ -17,6 +20,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _downloaderPage = new DownloaderPage();
+        _appInfoPage = new AppInfoPage();
         NavigateTo(NavPage.Downloader);
     }
 
@@ -33,11 +38,11 @@ public partial class MainWindow : Window
         switch (page)
         {
             case NavPage.Downloader:
-                MainFrame.Navigate(new DownloaderPage());
+                MainFrame.Navigate(_downloaderPage);
                 SetNavState(downloaderActive: true);
                 break;
             case NavPage.AppInfo:
-                MainFrame.Navigate(new AppInfoPage());
+                MainFrame.Navigate(_appInfoPage);
                 SetNavState(downloaderActive: false);
                 break;
         }
