@@ -18,6 +18,8 @@ public partial class DownloaderPage : Page
     private List<VideoFormat> _formatsList = new();
     private bool   _isPlaylist    = false;
     private string _playlistFolder = "";
+    private CancellationTokenSource? _cts;
+
 
     private static readonly HttpClient _http = new()
     {
@@ -79,150 +81,186 @@ public partial class DownloaderPage : Page
     }
 
     // ── Analyze — single video ───────────────────────────────────────────────
+
     private async Task AnalyzeVideo(string url)
     {
+        var token = PrepareNewToken();
+
         try
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName               = "yt-dlp.exe",
-                Arguments              = $"--dump-json \"{url}\"",
+                FileName = "yt-dlp.exe",
+                Arguments = $"--no-warnings --no-check-certificates --dump-json \"{url}\"",
                 RedirectStandardOutput = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 StandardOutputEncoding = System.Text.Encoding.UTF8
             };
 
             string json = await Task.Run(() =>
             {
                 using var proc = Process.Start(startInfo);
-                return proc?.StandardOutput.ReadToEnd() ?? "";
-            });
+                if (proc == null) return "";
 
-            if (string.IsNullOrWhiteSpace(json))
+                using (token.Register(() =>
+                       {
+                           try
+                           {
+                               proc.Kill();
+                           }
+                           catch
+                           {
+                           }
+                       }))
+                {
+                    return proc.StandardOutput.ReadToEnd();
+                }
+            }, token);
+
+            if (token.IsCancellationRequested || string.IsNullOrWhiteSpace(json)) return;
+
+            var node = JsonNode.Parse(json);
+            var formats = node?["formats"]?.AsArray();
+            if (formats == null)
             {
-                SetStatus("No data returned. Check the URL or yt-dlp.", "#FF4444");
+                SetStatus("Format error", "#FF4444");
                 return;
             }
 
-            var node    = JsonNode.Parse(json);
-            var formats = node?["formats"]?.AsArray();
-            if (formats == null) { SetStatus("Could not parse video formats.", "#FF4444"); return; }
-
-            string title    = node?["title"]?.ToString()    ?? "Unknown Title";
-            string channel  = node?["uploader"]?.ToString() ?? "Unknown Channel";
+            string title = node?["title"]?.ToString() ?? "Unknown Title";
+            string channel = node?["uploader"]?.ToString() ?? "Unknown Channel";
             string thumbUrl = node?["thumbnail"]?.ToString() ?? "";
 
             _formatsList = formats
                 .Where(f => f?["vcodec"]?.ToString() is string vc && vc != "none")
                 .Select(f =>
                 {
-                    long size = 0;
-                    if      (f!["filesize"]        is JsonNode fs) size = fs.GetValue<long>();
-                    else if (f ["filesize_approx"] is JsonNode fa) size = fa.GetValue<long>();
-
-                    string ext  = f["ext"]?.ToString() ?? "?";
-                    string note = f["format_note"]?.ToString()
-                               ?? f["resolution"]?.ToString()
-                               ?? f["format_id"]!.ToString();
-                    string sizeLabel = size > 0 ? $"{size / 1024.0 / 1024.0:F1} MB" : "size N/A";
+                    long size = (f!["filesize"] ?? f["filesize_approx"])?.GetValue<long>() ?? 0;
+                    string ext = f["ext"]?.ToString() ?? "?";
+                    string note = (f["format_note"] ?? f["resolution"] ?? f["format_id"])!.ToString();
 
                     return new VideoFormat
                     {
-                        Id       = f["format_id"]!.ToString(),
-                        Ext      = ext,
+                        Id = f["format_id"]!.ToString(),
+                        Ext = ext,
                         Filesize = size,
-                        Display  = $"{note} ({ext}) — {sizeLabel}"
+                        Display = $"{note} ({ext}) — {(size > 0 ? $"{size / 1024.0 / 1024.0:F1} MB" : "N/A")}"
                     };
                 })
                 .OrderByDescending(x => x.Filesize)
                 .ToList();
 
-            if (_formatsList.Count == 0)
-            {
-                SetStatus("No downloadable video formats found.", "#FF4444");
-                return;
-            }
-
-            TxtTitle.Text   = title;
+            TxtTitle.Text = title;
             TxtChannel.Text = channel;
-
-            if (!string.IsNullOrEmpty(thumbUrl))
-            {
-                try
-                {
-                    byte[] imgBytes = await _http.GetByteArrayAsync(thumbUrl);
-                    using var ms = new MemoryStream(imgBytes);
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption  = BitmapCacheOption.OnLoad;
-                    bmp.StreamSource = ms;
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    ImgThumbnail.Source = bmp;
-                }
-                catch { ImgThumbnail.Source = null; }
-            }
-
-            ComboFormats.ItemsSource   = _formatsList;
+            ComboFormats.ItemsSource = _formatsList;
             ComboFormats.SelectedIndex = 0;
 
-            VideoCard.Visibility  = Visibility.Visible;
+            VideoCard.Visibility = Visibility.Visible;
             BtnDownload.IsEnabled = true;
             SetStatus("Ready to download", "#00D26A");
+
+            _ = LoadThumbnailAsync(thumbUrl, token);
+
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Analysis stopped.", "#666666");
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Analysis Error:\n{ex.Message}", "Error",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show($"Error: {ex.Message}");
             SetStatus("Analysis failed.", "#FF4444");
         }
+    }
+
+    private async Task LoadThumbnailAsync(string url, CancellationToken token)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        try
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (token.IsCancellationRequested) return;
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.UriSource = new Uri(url, UriKind.Absolute);
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.EndInit();
+                ImgThumbnail.Source = bmp;
+            });
+        }
+        catch { /* ignored*/ }
     }
 
     // ── Analyze — playlist ───────────────────────────────────────────────────
     private async Task AnalyzePlaylist(string url)
     {
+        var token = PrepareNewToken();
+
         try
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName               = "yt-dlp.exe",
-                Arguments              = $"--flat-playlist --dump-json \"{url}\"",
+                FileName = "yt-dlp.exe",
+                Arguments = $"--flat-playlist --no-warnings --no-check-certificates --dump-json \"{url}\"",
                 RedirectStandardOutput = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 StandardOutputEncoding = System.Text.Encoding.UTF8
             };
 
             var lines = new List<string>();
+            var foundCount = 0;
+            
+            SetStatus("Searching for videos...", "#FF9900");
+            PlaylistCard.Visibility = Visibility.Collapsed;
+
             await Task.Run(() =>
             {
-                using var proc = Process.Start(startInfo)!;
-                string? line;
-                while ((line = proc.StandardOutput.ReadLine()) != null)
-                    if (!string.IsNullOrWhiteSpace(line)) lines.Add(line);
-                proc.WaitForExit();
-            });
+                using var proc = Process.Start(startInfo);
+                if (proc == null) return;
 
-            if (lines.Count == 0)
+                using (token.Register(() => { try { proc.Kill(); } catch { } }))
+                {
+                    string? line;
+                    while ((line = proc.StandardOutput.ReadLine()) != null)
+                    {
+                        if (token.IsCancellationRequested) break;
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+
+                        lines.Add(line);
+                        foundCount++;
+
+                        if (foundCount % 5 == 0)
+                        {
+                            Dispatcher.Invoke(() => SetStatus($"Found {foundCount} videos...", "#FF9900"));
+                        }
+                    }
+                    proc.WaitForExit();
+                }
+            }, token);
+
+            if (token.IsCancellationRequested)
             {
-                SetStatus("No videos found in playlist. Check the URL.", "#FF4444");
+                SetStatus("Analysis cancelled.", "#666666");
                 return;
             }
 
-            string playlistTitle   = "Unknown Playlist";
-            string playlistChannel = "Unknown Channel";
-            try
+            if (lines.Count == 0)
             {
-                var first = JsonNode.Parse(lines[0]);
-                playlistTitle   = first?["playlist_title"]?.ToString()
-                               ?? first?["playlist"]?.ToString()
-                               ?? "YouTube Playlist";
-                playlistChannel = first?["uploader"]?.ToString()
-                               ?? first?["channel"]?.ToString()
-                               ?? "Unknown Channel";
+                SetStatus("No videos found in playlist.", "#FF4444");
+                return;
             }
-            catch { /* ignore */ }
+
+            var playlistTitle = "Unknown Playlist";
+            var playlistChannel = "Unknown Channel";
+            
+            try {
+                var firstNode = JsonNode.Parse(lines[0]);
+                playlistTitle = firstNode?["playlist_title"]?.ToString() ?? firstNode?["playlist"]?.ToString() ?? "YouTube Playlist";
+                playlistChannel = firstNode?["uploader"]?.ToString() ?? firstNode?["channel"]?.ToString() ?? "Unknown Channel";
+            } catch { /* ignored */ }
 
             TxtPlaylistTitle.Text   = playlistTitle;
             TxtPlaylistChannel.Text = playlistChannel;
@@ -231,13 +269,17 @@ public partial class DownloaderPage : Page
             PlaylistCard.Visibility          = Visibility.Visible;
             PlaylistProgressPanel.Visibility = Visibility.Collapsed;
             BtnDownload.IsEnabled            = true;
-            SetStatus($"Playlist ready — {lines.Count} videos found", "#00D26A");
+            SetStatus($"Playlist ready — {lines.Count} videos", "#00D26A");
+
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Analysis stopped.", "#666666");
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Playlist Analysis Error:\n{ex.Message}", "Error",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-            SetStatus("Playlist analysis failed.", "#FF4444");
+            System.Windows.MessageBox.Show($"Error: {ex.Message}");
+            SetStatus("Analysis failed.", "#FF4444");
         }
     }
 
@@ -590,4 +632,13 @@ public partial class DownloaderPage : Page
 
     private void CloseSuccess_Click(object sender, RoutedEventArgs e)
         => SuccessOverlay.Visibility = Visibility.Collapsed;
+    
+    // ── Helpers ──────────────────────────────────────────────────────
+    private CancellationToken PrepareNewToken()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose(); 
+        _cts = new CancellationTokenSource();
+        return _cts.Token;
+    }
 }
