@@ -4,52 +4,75 @@
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
       mc:Ignorable="d" 
-      d:DesignHeight="600" d:DesignWidth="800"
-      Title="AppInfoPage" Background="#0F0F0F"> <Grid Margin="30">
-        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500">
+      d:DesignHeight="650" d:DesignWidth="850"
+      Title="App Info" Background="#0A0A0A">
+
+    <Grid>
+        <Border>
+            <Border.Background>
+                <RadialGradientBrush Center="0.5,-0.2" GradientOrigin="0.5,-0.2" RadiusX="1" RadiusY="1">
+                    <GradientStop Color="#1AEE0000" Offset="0"/>
+                    <GradientStop Color="#00000000" Offset="1"/>
+                </RadialGradientBrush>
+            </Border.Background>
+        </Border>
+
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="450">
             
-            <Border Width="80" Height="80" Background="#FF0000" CornerRadius="20" Margin="0,0,0,20">
-                <Path Data="M32.5,28.5V41.5L43.5,35L32.5,28.5Z" Fill="White" Stretch="Uniform" Margin="25"/>
+            <Border Width="100" Height="100" CornerRadius="25" Background="#151515" Margin="0,0,0,20">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" Color="Black" Opacity="0.3"/>
+                </Border.Effect>
+                <Image Source="pack://application:,,,/Assets/logo.png" Margin="15"/>
             </Border>
 
-            <TextBlock Text="YouTube Downloader" 
+            <TextBlock Text="OcTube Downloader" 
                        Foreground="White" 
-                       FontSize="28" 
-                       FontWeight="Bold" 
-                       HorizontalAlignment="Center" 
-                       Margin="0,0,0,5"/>
+                       FontSize="32" 
+                       FontWeight="ExtraBold" 
+                       HorizontalAlignment="Center"/>
 
-            <Border Background="#272727" CornerRadius="12" Padding="12,4" HorizontalAlignment="Center" Margin="0,0,0,30">
-                <TextBlock x:Name="TxtVersionLabel" Text="STABLE RELEASE" Foreground="#AAAAAA" FontSize="12" FontWeight="SemiBold"/>
+            <Border Background="#CCFF0000" CornerRadius="8" Padding="12,3" HorizontalAlignment="Center" Margin="0,10,0,40">
+                <TextBlock x:Name="TxtVersionLabel" Text="STABLE RELEASE" Foreground="White" FontSize="10" FontWeight="Black"/>
             </Border>
 
-            <Border Background="#1F1F1F" CornerRadius="15" Padding="20">
+            <Border Background="#161616" BorderBrush="#252525" BorderThickness="1" CornerRadius="20" Padding="5">
                 <StackPanel>
-                    <Grid Margin="0,10">
-                        <TextBlock Text="الإصدار" Foreground="#AAAAAA" FontSize="14" HorizontalAlignment="Right"/>
-                        <TextBlock x:Name="TxtVersion" Text="2.0.1" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Left"/>
-                    </Grid>
                     
-                    <Separator Background="#333333" Margin="0,5"/>
+                    <Border Background="Transparent" Padding="20,15" CornerRadius="15">
+                        <DockPanel>
+                            <TextBlock Text="Version" Foreground="#888" FontSize="14" DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtVersion" Text="2.0.1" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
 
-                    <Grid Margin="0,10">
-                        <TextBlock Text="المطور" Foreground="#AAAAAA" FontSize="14" HorizontalAlignment="Right"/>
-                        <TextBlock x:Name="TxtDeveloperName" Text="Ahmed Elsayed" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Left"/>
-                    </Grid>
+                    <Separator Background="#252525" Margin="15,0"/>
 
-                    <Separator Background="#333333" Margin="0,5"/>
+                    <Border Background="Transparent" Padding="20,15" CornerRadius="15">
+                        <DockPanel>
+                            <TextBlock Text="Developer" Foreground="#888" FontSize="14" DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="TxtDeveloperName" Text="Reda Essa" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
 
-                    <Grid Margin="0,10">
-                        <TextBlock Text="الدعم الفني" Foreground="#AAAAAA" FontSize="14" HorizontalAlignment="Right"/>
-                        <TextBlock x:Name="TxtDeveloperEmail" Text="contact@domain.com" Foreground="#3EA6FF" FontSize="14" FontWeight="Medium" HorizontalAlignment="Left" Cursor="Hand"/>
-                    </Grid>
+                    <Separator Background="#252525" Margin="15,0"/>
+
+                    <Border Background="Transparent" Padding="20,15" CornerRadius="15">
+                        <DockPanel>
+                            <TextBlock Text="GitHub" Foreground="#888" FontSize="14" DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtDeveloperEmail" Text="redaessa.dev@gmail.com" Foreground="#3EA6FF" FontSize="14" Cursor="Hand" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    
                 </StackPanel>
             </Border>
 
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,40,0,0" Opacity="0.5">
-                <TextBlock Text="© " Foreground="White"/>
-                <TextBlock x:Name="TxtCopyright" Text="Ahmed Elsayed" Foreground="White" Margin="5,0"/>
-                <TextBlock Text="2024" Foreground="White"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,30,0,0" Opacity="0.4">
+                <TextBlock Text="©" Foreground="White" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TxtCopyright" Text="Reda Essa" Foreground="White" Margin="5,0" VerticalAlignment="Center"/>
+                <TextBlock Text="2024 - 2026" Foreground="White" VerticalAlignment="Center"/>
             </StackPanel>
 
         </StackPanel>

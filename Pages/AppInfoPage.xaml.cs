@@ -14,6 +14,14 @@ namespace YoutubeDownloader.Pages
         {
             InitializeComponent();
             LoadAppDetails();
+            TxtDeveloperEmail.MouseDown += (s, e) =>
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "mailto:" + DevEmail,
+                    UseShellExecute = true
+                });
+            };
         }
 
         private void LoadAppDetails()
