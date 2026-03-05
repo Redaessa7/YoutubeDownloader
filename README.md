@@ -1,69 +1,90 @@
-# YouTube Downloader
+<p align="center">
+  <img src="Assets/logo.png" width="128" height="128" alt="YoutubeDownloader Logo">
+</p>
 
-A modern, high-performance YouTube video and playlist downloader built with C# and WPF. This application provides a user-friendly graphical interface for `yt-dlp`, allowing you to download videos in various resolutions and formats with ease.
+<h1 align="center">YoutubeDownloader</h1>
 
-## ✨ Features
+<p align="center">
+  <strong>A premium, high-performance YouTube video & playlist downloader built with C# and WPF.</strong><br>
+  <em>أداة احترافية عالية الأداء لتحميل فيديوهات وقوائم تشغيل يوتيوب، مصممة بلغة C# وتقنية WPF.</em>
+</p>
 
-- **Single Video Download**: Download individual videos by simply pasting the URL.
-- **Playlist Support**: Analyze and download entire playlists, with options to select specific ranges.
-- **Quality Selection**: Choose from various resolutions (1080p, 720p, 480p, etc.) and formats.
-- **Concurrent Fragments**: High-speed downloads using multiple concurrent fragments.
-- **Audio Options**: Options to download best or worst audio quality as needed.
-- **Real-time Progress**: Visual progress bars, speed indicators, and ETA for all downloads.
-- **Modern UI**: Sleek, glassmorphism-inspired design with dark mode support and smooth transitions.
-- **FFmpeg Integration**: Automatic merging of video and audio streams into high-quality MP4 files.
-
-## 🛠️ Built With
-
-- **Framework**: [.NET 10](https://dotnet.microsoft.com/)
-- **UI Architecture**: WPF (Windows Presentation Foundation)
-- **External Tools**: 
-  - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful core downloader.
-  - [FFmpeg](https://ffmpeg.org/) - For multimedia handling and merging.
-- **Primary Libraries**: `WindowsAPICodePack` (for folder selection dialogs).
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-To run or build this project, you need:
-1.  **.NET 10 SDK** or later.
-2.  **yt-dlp.exe**: Should be placed in the application directory.
-3.  **ffmpeg.exe**: Should be placed in the application directory (or available in PATH).
-
-### Installation
-
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/Redaessa7/YoutubeDownloader.git
-    ```
-2.  Navigate to the project folder:
-    ```bash
-    cd YoutubeDownloader
-    ```
-3.  Ensure `yt-dlp.exe` and `ffmpeg.exe` are in the project root or the same directory as the executable.
-4.  Build the project:
-    ```bash
-    dotnet build
-    ```
-
-## 📖 Usage
-
-1.  **Paste URL**: Enter the YouTube video or playlist URL in the input field.
-2.  **Analyze**: Click the "Analyze" button to fetch metadata and available formats.
-3.  **Configure**:
-    - For **Videos**: Choose your preferred resolution from the dropdown.
-    - For **Playlists**: Select the save folder and optionally define the video range (e.g., from 1 to 10).
-4.  **Download**: Click "Download" and watch the progress in real-time.
-5.  **Success**: Once finished, a success message will appear, and your file will be ready!
-
-## 🤝 Contributing
-
-Contributions are welcome! If you have any ideas, suggestions, or bug reports, please open an issue or submit a pull request.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details (if applicable).
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/Redaessa7/YoutubeDownloader?style=for-the-badge&color=7b2cbf" alt="Version">
+  <img src="https://img.shields.io/github/license/Redaessa7/YoutubeDownloader?style=for-the-badge&color=3f37c9" alt="License">
+  <img src="https://img.shields.io/badge/.NET-10.0-512bd4?style=for-the-badge&logo=dotnet" alt=".NET 10">
+  <img src="https://img.shields.io/badge/Platform-Windows-0078d4?style=for-the-badge&logo=windows" alt="Windows">
+</p>
 
 ---
-*Created with ❤️ by [Redaessa7](https://github.com/Redaessa7)*
+
+## 📸 Preview / المعاينة
+
+![Modern UI Mockup](Assets/image.png)
+*Designed with a modern Glassmorphism aesthetic and a focus on User Experience.*
+
+---
+
+## ✨ Features / المميزات
+
+### 🇬🇧 English
+- **Single & Playlist Support**: Seamlessly download individual videos or entire playlists with metadata.
+- **Advanced Quality Selection**: Supports up to 4K resolution (depending on source) and selective audio quality.
+- **High-Speed Downloads**: Utilizes concurrent fragments for maximum throughput.
+- **Glassmorphism UI**: A stunning, modern interface with dark mode and smooth animations.
+- **Auto-Merging**: Automatically merges high-quality video and audio using FFmpeg integration.
+- **Real-time Analytics**: Live speed indicators, ETA, and progress tracking.
+
+### 🇦🇪 العربية
+- **دعم الفيديوهات وقوائم التشغيل**: تحميل سهل للفيديوهات المنفردة أو قوائم التشغيل الكاملة مع البيانات الوصفية.
+- **خيارات جودة متقدمة**: دعم لدقة تصل إلى 4K (حسب المصدر) مع إمكانية اختيار جودة الصوت.
+- **تحميل فائق السرعة**: استخدام تقنية الأجزاء المتزامنة لضمان أقصى سرعة ممكنة.
+- **واجهة عصرية**: تصميم زجاجي (Glassmorphism) مذهل مع دعم للوضع المظلم وتأثيرات سلسة.
+- **دمج تلقائي**: دمج تلقائي لمسارات الفيديو والصوت بجودة عالية باستخدام محرك FFmpeg.
+- **إحصائيات مباشرة**: مؤشرات حية للسرعة، الوقت المتبقي، وتتبع التقدم.
+
+---
+
+## 🛠️ Tech Stack / التقنيات المستخدمة
+
+- **Frontend**: WPF (XAML) with modern UI patterns.
+- **Runtime**: .NET 10.0 (Windows Sdk).
+- **Core Engine**: [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The industry standard for video extraction.
+- **Multimedia Engine**: [FFmpeg](https://ffmpeg.org/) - For stream muxing and processing.
+- **Libraries**: `WindowsAPICodePack` for shell integration.
+
+---
+
+## 🚀 Installation / التثبيت
+
+### Prerequisites / المتطلبات
+1. **.NET 10 Runtime** installed on your Windows machine.
+2. `yt-dlp.exe` and `ffmpeg.exe` should be in the application root folder.
+
+### Setup Steps / خطوات الإعداد
+```bash
+# Clone the repository
+git clone https://github.com/Redaessa7/YoutubeDownloader.git
+
+# Navigate to directory
+cd YoutubeDownloader
+
+# Build and Run
+dotnet run
+```
+
+---
+
+## 🤝 Contributing / المساهمة
+
+We welcome contributions! Localize the UI, add new features, or report bugs via Issues.
+نرحب بمساهماتكم! سواء في ترجمة الواجهة، إضافة ميزات جديدة، أو الإبلاغ عن الأخطاء عبر قسم Issues.
+
+## 📄 License / الترخيص
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
+مرخص تحت رخصة **MIT**. راجع ملف `LICENSE` للمزيد من المعلومات.
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/Redaessa7">Redaessa7</a>
+</p>
