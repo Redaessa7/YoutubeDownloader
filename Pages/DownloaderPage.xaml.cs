@@ -10,7 +10,7 @@ using System.Windows.Forms;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace YoutubeDownloader.Pages;
+namespace OcTubeDownloader.Pages;
 
 public partial class DownloaderPage : Page
 {

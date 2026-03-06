@@ -2,7 +2,7 @@
 using System.Data;
 using System.Windows;
 
-namespace YoutubeDownloader;
+namespace OcTubeDownloader;
 
 /// <summary>
 /// Interaction logic for App.xaml

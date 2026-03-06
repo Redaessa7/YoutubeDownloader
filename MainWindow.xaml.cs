@@ -1,8 +1,8 @@
 ﻿using System.Windows;
 using System.Windows.Media;
-using YoutubeDownloader.Pages;
+using OcTubeDownloader.Pages;
 
-namespace YoutubeDownloader;
+namespace OcTubeDownloader;
 
 public partial class MainWindow : Window
 {
