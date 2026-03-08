@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppName.Text = "OcTubeDownloader";
         _downloaderPage = new DownloaderPage();
         _appInfoPage = new AppInfoPage();
         NavigateTo(NavPage.Downloader);
