@@ -8,7 +8,7 @@ namespace OcTubeDownloader.Pages
     public partial class AppInfoPage : Page
     {
         // بيانات التطبيق
-        private const string AppVersion      = "2.0.1";
+        private const string AppVersion      = "2.1.0";
         private const string AppStatus       = "STABLE RELEASE";
         private const string DevName         = "Redaessa7";
 

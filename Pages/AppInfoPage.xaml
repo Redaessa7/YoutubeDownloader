@@ -34,7 +34,7 @@
 
             <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
                 <TextBlock Text="v " Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <TextBlock x:Name="TxtVersion" Text="2.0.1" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TxtVersion" Text="2.1.0" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
             <Border Background="#CCFF0000" CornerRadius="8" Padding="12,3" HorizontalAlignment="Center" Margin="0,10,0,24">
                 <TextBlock x:Name="TxtVersionLabel" Text="STABLE RELEASE" Foreground="White" FontSize="10" FontWeight="Black"/>
