@@ -389,7 +389,13 @@ public partial class DownloaderPage : Page
         ProgBar.Value         = 0;
         TxtPercent.Text       = "";
 
-        string audioMode = RadioAudioHigh.IsChecked == true ? "bestaudio" : "worstaudio";
+        // Prefer the ORIGINAL audio track: YouTube now ships AI auto-dubs
+        // (e.g. 140-0 original vs 140-1 dubbed) and plain bestaudio may pick
+        // the dub YouTube marks "(default)". Fallback keeps normal videos working.
+        // See https://github.com/yt-dlp/yt-dlp/issues/11753
+        string audioMode = RadioAudioHigh.IsChecked == true
+            ? "(ba[format_note*=original]/bestaudio)"
+            : "(wa[format_note*=original]/worstaudio)";
 
         var startInfo = new ProcessStartInfo
         {
@@ -466,7 +472,10 @@ public partial class DownloaderPage : Page
         }
 
         string qualityFilter = BuildPlaylistQualityFilter();
-        string audioMode     = RadioAudioHigh.IsChecked == true ? "bestaudio" : "worstaudio";
+        // Same original-audio preference as single downloads (see above).
+        string audioMode     = RadioAudioHigh.IsChecked == true
+            ? "(ba[format_note*=original]/bestaudio)"
+            : "(wa[format_note*=original]/worstaudio)";
 
         string playlistItems = "";
         string from = TxtPlaylistFrom.Text.Trim();
