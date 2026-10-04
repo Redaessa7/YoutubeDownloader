@@ -28,6 +28,21 @@ public partial class DownloaderPage : Page
 
     private const int DownloadFragments = 8;
 
+    // Full path to the bundled engine (safer than relying on the working dir).
+    private static readonly string YtDlpPath =
+        Path.Combine(AppContext.BaseDirectory, "yt-dlp.exe");
+
+    // YouTube now requires an external JS runtime (Deno/Node) to solve its
+    // JS challenges. Deno is enabled in yt-dlp by default, Node must be
+    // opted in via --js-runtimes. We detect what's available next to the exe
+    // or on PATH and pass the right flag.
+    // See https://github.com/yt-dlp/yt-dlp/wiki/EJS
+    private static readonly string JsRuntimeArgs = DetectJsRuntimeArgs();
+
+    // NOTE: never pass youtube:formats=missing_pot here. That extractor-arg
+    // is NOT for general use — it unlocks formats missing a PO Token which
+    // then fail with HTTP 403. Default clients + a JS runtime is the fix.
+
     // ── Model ────────────────────────────────────────────────────────────────
     public class VideoFormat
     {
@@ -35,6 +50,7 @@ public partial class DownloaderPage : Page
         public string Display  { get; set; } = "";
         public string Ext      { get; set; } = "";
         public long   Filesize { get; set; }
+        public int    Height   { get; set; }
     }
 
     public DownloaderPage()
@@ -90,35 +106,45 @@ public partial class DownloaderPage : Page
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = "yt-dlp.exe",
-                Arguments = $"--no-warnings --no-check-certificates --dump-json \"{url}\"",
+                FileName = YtDlpPath,
+                Arguments = $"--no-warnings --no-check-certificates {JsRuntimeArgs} --dump-json \"{url}\"",
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 StandardOutputEncoding = System.Text.Encoding.UTF8
             };
 
-            string json = await Task.Run(() =>
+            var (json, analyzeError, analyzeExit) =
+                await Task.Run<(string Json, string Error, int ExitCode)>(() =>
             {
                 using var proc = Process.Start(startInfo);
-                if (proc == null) return "";
+                if (proc == null) return ("", "Could not start yt-dlp.exe.", -1);
 
                 using (token.Register(() =>
-                       {
-                           try
-                           {
-                               proc.Kill();
-                           }
-                           catch
-                           {
-                           }
-                       }))
+                        {
+                            try
+                            {
+                                proc.Kill();
+                            }
+                            catch
+                            {
+                            }
+                        }))
                 {
-                    return proc.StandardOutput.ReadToEnd();
+                    string outJson = proc.StandardOutput.ReadToEnd();
+                    string err = proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+                    return (outJson, err, proc.ExitCode);
                 }
             }, token);
 
-            if (token.IsCancellationRequested || string.IsNullOrWhiteSpace(json)) return;
+            if (token.IsCancellationRequested) return;
+            if (string.IsNullOrWhiteSpace(json) || analyzeExit != 0)
+            {
+                ShowAnalyzeError("Could not read video info.", analyzeError, analyzeExit);
+                return;
+            }
 
             var node = JsonNode.Parse(json);
             var formats = node?["formats"]?.AsArray();
@@ -140,15 +166,20 @@ public partial class DownloaderPage : Page
                     string ext = f["ext"]?.ToString() ?? "?";
                     string note = (f["format_note"] ?? f["resolution"] ?? f["format_id"])!.ToString();
 
+                    int height = 0;
+                    try { height = f["height"]?.GetValue<int>() ?? 0; } catch { /* ignore */ }
+
                     return new VideoFormat
                     {
                         Id = f["format_id"]!.ToString(),
                         Ext = ext,
                         Filesize = size,
+                        Height = height,
                         Display = $"{note} ({ext}) — {(size > 0 ? $"{size / 1024.0 / 1024.0:F1} MB" : "N/A")}"
                     };
                 })
-                .OrderByDescending(x => x.Filesize)
+                .OrderByDescending(x => x.Height)
+                .ThenByDescending(x => x.Filesize)
                 .ToList();
 
             TxtTitle.Text = title;
@@ -202,16 +233,19 @@ public partial class DownloaderPage : Page
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = "yt-dlp.exe",
-                Arguments = $"--flat-playlist --no-warnings --no-check-certificates --dump-json \"{url}\"",
+                FileName = YtDlpPath,
+                Arguments = $"--flat-playlist --no-warnings --no-check-certificates {JsRuntimeArgs} --dump-json \"{url}\"",
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 StandardOutputEncoding = System.Text.Encoding.UTF8
             };
 
             var lines = new List<string>();
+            var stdErr = new List<string>();
             var foundCount = 0;
+            int playlistExit = -1;
             
             SetStatus("Searching for videos...", "#FF9900");
             PlaylistCard.Visibility = Visibility.Collapsed;
@@ -223,6 +257,13 @@ public partial class DownloaderPage : Page
 
                 using (token.Register(() => { try { proc.Kill(); } catch { } }))
                 {
+                    proc.ErrorDataReceived += (s, ev) =>
+                    {
+                        if (!string.IsNullOrEmpty(ev.Data))
+                            lock (stdErr) stdErr.Add(ev.Data);
+                    };
+                    proc.BeginErrorReadLine();
+
                     string? line;
                     while ((line = proc.StandardOutput.ReadLine()) != null)
                     {
@@ -238,6 +279,7 @@ public partial class DownloaderPage : Page
                         }
                     }
                     proc.WaitForExit();
+                    playlistExit = proc.ExitCode;
                 }
             }, token);
 
@@ -249,7 +291,9 @@ public partial class DownloaderPage : Page
 
             if (lines.Count == 0)
             {
-                SetStatus("No videos found in playlist.", "#FF4444");
+                string err;
+                lock (stdErr) err = string.Join('\n', stdErr.TakeLast(8));
+                ShowAnalyzeError("No videos found in playlist.", err, playlistExit);
                 return;
             }
 
@@ -349,17 +393,21 @@ public partial class DownloaderPage : Page
 
         var startInfo = new ProcessStartInfo
         {
-            FileName               = "yt-dlp.exe",
-            Arguments              = $"-f \"{selected.Id}+{audioMode}\" "
-                                   + $"--concurrent-fragments {DownloadFragments} "
-                                   + $"--newline --merge-output-format mp4 "
-                                   + $"--ffmpeg-location . "
-                                   + $"-o \"{sfd.FileName}\" \"{TxtUrl.Text}\"",
+            FileName               = YtDlpPath,
+                Arguments              = $"-f \"{selected.Id}+{audioMode}/b\" "
+                                        + $"--concurrent-fragments {DownloadFragments} "
+                                        + $"{JsRuntimeArgs} "
+                                        + $"--newline --merge-output-format mp4 "
+                                        + $"--ffmpeg-location . "
+                                        + $"-o \"{sfd.FileName}\" \"{TxtUrl.Text}\"",
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true
         };
+
+        var errorLines = new List<string>();
+        int exitCode = -1;
 
         try
         {
@@ -373,16 +421,21 @@ public partial class DownloaderPage : Page
                 };
                 process.ErrorDataReceived += (s, ev) =>
                 {
-                    if (!string.IsNullOrEmpty(ev.Data))
-                        ParseProgressLine(ev.Data, isPlaylist: false);
+                    if (string.IsNullOrEmpty(ev.Data)) return;
+                    lock (errorLines) errorLines.Add(ev.Data);
+                    ParseProgressLine(ev.Data, isPlaylist: false);
                 };
                 process.Start();
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
                 process.WaitForExit();
+                exitCode = process.ExitCode;
             });
 
-            ShowSuccess("Download Complete!", "File saved successfully.");
+            if (exitCode == 0 && File.Exists(sfd.FileName))
+                ShowSuccess("Download Complete!", "File saved successfully.");
+            else
+                ShowDownloadError(errorLines, isPlaylist: false);
         }
         catch (Exception ex)
         {
@@ -430,13 +483,14 @@ public partial class DownloaderPage : Page
 
         var startInfo = new ProcessStartInfo
         {
-            FileName               = "yt-dlp.exe",
-            Arguments              = $"-f \"{qualityFilter}+{audioMode}\" "
-                                   + $"--concurrent-fragments {DownloadFragments} "
-                                   + $"--newline --merge-output-format mp4 "
-                                   + $"--ffmpeg-location . "
-                                   + playlistItems
-                                   + $"-o \"{outputTemplate}\" \"{TxtUrl.Text}\"",
+            FileName               = YtDlpPath,
+                Arguments              = $"-f \"{qualityFilter}+{audioMode}/b\" "
+                                        + $"--concurrent-fragments {DownloadFragments} "
+                                        + $"{JsRuntimeArgs} "
+                                        + $"--newline --merge-output-format mp4 "
+                                        + $"--ffmpeg-location . "
+                                        + playlistItems
+                                        + $"-o \"{outputTemplate}\" \"{TxtUrl.Text}\"",
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
@@ -453,6 +507,9 @@ public partial class DownloaderPage : Page
         int currentIndex = 0;
 
         SetStatus("Starting playlist download…", "#FF9900");
+
+        var playlistErrors = new List<string>();
+        int playlistExit = -1;
 
         try
         {
@@ -495,24 +552,33 @@ public partial class DownloaderPage : Page
 
                 process.ErrorDataReceived += (s, ev) =>
                 {
-                    if (!string.IsNullOrEmpty(ev.Data))
-                        ParseProgressLine(ev.Data, isPlaylist: true,
-                            currentIdx: currentIndex, total: totalVideos);
+                    if (string.IsNullOrEmpty(ev.Data)) return;
+                    lock (playlistErrors) playlistErrors.Add(ev.Data);
+                    ParseProgressLine(ev.Data, isPlaylist: true,
+                        currentIdx: currentIndex, total: totalVideos);
                 };
 
                 process.Start();
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
                 process.WaitForExit();
+                playlistExit = process.ExitCode;
             });
 
-            Dispatcher.Invoke(() =>
+            if (playlistExit == 0)
             {
-                ProgBarPlaylist.Value = 100;
-                ProgBarVideo.Value   = 100;
-            });
+                Dispatcher.Invoke(() =>
+                {
+                    ProgBarPlaylist.Value = 100;
+                    ProgBarVideo.Value   = 100;
+                });
 
-            ShowSuccess("Playlist Downloaded!", $"All videos saved to:\n{_playlistFolder}");
+                ShowSuccess("Playlist Downloaded!", $"All videos saved to:\n{_playlistFolder}");
+            }
+            else
+            {
+                ShowDownloadError(playlistErrors, isPlaylist: true);
+            }
         }
         catch (Exception ex)
         {
@@ -634,6 +700,70 @@ public partial class DownloaderPage : Page
         => SuccessOverlay.Visibility = Visibility.Collapsed;
     
     // ── Helpers ──────────────────────────────────────────────────────
+    private static string DetectJsRuntimeArgs()
+    {
+        bool hasDeno = FindExecutable("deno.exe");
+        bool hasNode = FindExecutable("node.exe");
+
+        // Deno is already enabled by default inside yt-dlp.
+        if (hasDeno && hasNode) return "--js-runtimes deno,node";
+        if (hasNode)            return "--js-runtimes node";
+        return ""; // neither found: yt-dlp will warn; we surface that warning.
+    }
+
+    private static bool FindExecutable(string fileName)
+    {
+        // 1) next to the app / engine
+        if (File.Exists(Path.Combine(AppContext.BaseDirectory, fileName)))
+            return true;
+
+        // 2) on PATH
+        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(pathEnv)) return false;
+        return pathEnv.Split(Path.PathSeparator)
+            .Any(dir =>
+            {
+                try { return File.Exists(Path.Combine(dir.Trim('"'), fileName)); }
+                catch { return false; }
+            });
+    }
+
+    private static string FriendlyHint(string output)
+    {
+        if (output.Contains("JavaScript runtime", StringComparison.OrdinalIgnoreCase))
+            return "\n\nFix: install Deno (recommended) or Node.js 22+, "
+                 + "or place deno.exe next to yt-dlp.exe, then retry.";
+        if (output.Contains("403", StringComparison.OrdinalIgnoreCase))
+            return "\n\nThis usually means the video format needs a fresh "
+                 + "yt-dlp (App Info → Update) or a JS runtime (see above).";
+        if (output.Contains("not available", StringComparison.OrdinalIgnoreCase))
+            return "\n\nThe selected format is gone — press Analyze again to "
+                 + "refresh the quality list.";
+        return "";
+    }
+
+    private void ShowAnalyzeError(string summary, string stdErr, int exitCode)
+    {
+        string details = string.IsNullOrWhiteSpace(stdErr) ? "" : "\n\n" + stdErr.Trim();
+        string hint = FriendlyHint(stdErr);
+        System.Windows.MessageBox.Show($"{summary} (exit {exitCode})."
+            + details + hint, "Analysis failed",
+            MessageBoxButton.OK, MessageBoxImage.Error);
+        SetStatus("Analysis failed.", "#FF4444");
+    }
+
+    private void ShowDownloadError(List<string> errorLines, bool isPlaylist)
+    {
+        string tail;
+        lock (errorLines)
+            tail = string.Join('\n', errorLines.TakeLast(8));
+        string hint = FriendlyHint(tail);
+        string what = isPlaylist ? "Playlist download failed." : "Download failed.";
+        System.Windows.MessageBox.Show($"{what}\n\n{tail}{hint}", "Error",
+            MessageBoxButton.OK, MessageBoxImage.Error);
+        SetStatus(what, "#FF4444");
+    }
+
     private CancellationToken PrepareNewToken()
     {
         _cts?.Cancel();
